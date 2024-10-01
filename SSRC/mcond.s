@@ -1,0 +1,7 @@
+(define def-cond '(extend-syntax (mcond else)
+   ( (mcond) #f )
+   ( (mcond (else e1 e2 ...)) (begin e1 e2 ...))
+   ( (mcond test more ...) (or test (mcond more ...)))
+   ( (mcond (test e1 e2 ...) more ...)
+	(if test (begin e1 e2 ...) (mcond more ...))))
+)

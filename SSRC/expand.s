@@ -1,0 +1,67 @@
+;;; Compiler expander - Version 1.2
+;;;	written by Jason Coughlin
+;;;
+;;;   Macros are stored in the a-list *EXPANSION-TABLE*.  The system expands
+;;; macros before evaluation and before compilation.  Compiler-syntax forms
+;;; are stored in the a-list *COMPILER-SYNTAX*.  Compiler-syntax forms are
+;;; expanded ONLY BEFORE COMPILATION.
+;;;
+;;;   Compiler-syntax forms are forms that are probably implemented in the
+;;; interpreter but are not expressions that the compiler knows how to
+;;; compile.  The expander expands the expression into something that the
+;;; compiler CAN compile.
+;;;
+;;;   This expander is only used by the compiler; EVAL has its own expander.
+
+(define *COMPILER-SYNTAX* '())
+
+;;; (COMPILER-SYNTAX keyword function)
+(macro compiler-syntax
+   (lambda (e)
+	(list 'add-compiler-syntax (list 'quote (cadr e)) (caddr e))
+   )
+)
+
+;;; (add-compiler-syntax keyword func) - Add a compile-syntax form to
+;;;	the *COMPILER-SYNTAX* table.
+(define (add-compiler-syntax keyword func)
+   (cons (cons keyword func) *COMPILER-SYNTAX*)
+)
+
+;; (Expand exp) - Expand ALL macros in exp.  Macros are expanded before
+;;	compile-syntax forms.
+(define (expand exp)
+   (if (not (pair? exp))
+
+	; can't expand expressions which are atoms
+	exp
+
+	; expanding this expression, pull out the expander functions
+	(let* ( (macro-bind	(assoc (car exp) *EXPANSION-TABLE*) )
+		(compile-bind	(assoc (car exp) *COMPILER-SYNTAX*) )
+		(macro-exp	(and (not (null? macro-bind)) (cdr macro-bind)) )
+		(compile-exp	(and (not (null? compile-bind)) (cdr compile-bind)) )
+	      )
+
+		(if (null? macro-exp)
+		   ; there is no macro expansion, see if there is a
+		   ; compile-syntax expansion to be performed.
+		   (if (null? compile-exp)
+
+		      ; no expansions, expand sub-expressions
+		      (map expand exp)
+
+		      ; expand sub-expressions after expanding THIS expression
+		      (map expand (compile-exp exp))
+		   )
+
+		   ; there is a macro expansion, ignore the compiler-syntax
+		   ; for now since there is no guarantee what the expression
+		   ; will look like after the macro expansion.  invoke
+		   ; expand again after the macro to expand a possible
+		   ; compiler-syntax which results from the macro
+		   (expand (macro-exp exp))
+		)
+	)
+   )
+)

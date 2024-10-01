@@ -1,0 +1,8 @@
+(define print display)
+(define (writeln . x) (display x) (newline))
+(define (debug-writeln . x) (if debug-on (writeln x) ) )
+(define debug-on ())
+(define (cadddr l) (car (cdr (cdr (cdr l)))))
+(define (caddr l) (car (cdr (cdr l))))
+(define (cadr l) (car (cdr l)))
+(define (cddr l) (cdr (cdr l)))

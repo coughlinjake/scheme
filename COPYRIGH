@@ -1,0 +1,166 @@
+Scheme -- Copyright (C) 1990 by Jason Coughlin
+
+	All Scheme code in C copyright (C) 1990 by Jason Coughlin.  You are
+	granted permission to make unlimited copies of this source code
+	and to distribute these copies provided:
+
+		(1) You distribute the source code in all copies.
+		(2) You distribute the copyright message in all copies.
+		(3) You charge nothing more than the cost of the disk or
+		    tape on to which you copy it, mailing charge, or some
+		    other similar nominal fee.
+
+	Please feel free to make modifications.  However, I would appreciate
+	hearing from you so that your changes can benefit everyone using
+	this program.
+
+	Please send me bug fixes or bug reports!  I'm shooting for an
+	easy to use, robust implementation of Scheme that people are really
+	going to use.
+
+	I am in debt to Dr. Gary Levin for the ideas, the motivation, the
+	bug fixes, and the guidance.  Without his help, this program would
+	have never seen a CPU.
+
+	Extend-syntax idea courtesy of Eugene Kohlbecker.  Extend-syntax
+	sources courtesy of R. Kent Dybvig.
+
+*Good References*
+
+	Here are some good books on LISP and Scheme.  This by no means
+complete or official, and I apologize if I leave an author out!
+
+	_The Little Lisper_ by Daniel Friedman.  This is a good
+introduction to LISP for LISP beginners.
+
+	_The Structure and Interpretation of Computer Programs_ by
+Gerald Sussman, and Julie Sussman.  Everyone should read this one in a
+programming langs course.
+
+	_The Scheme Programming Language_ by R. Kent Dybvig.  This is
+an excellent reference and source of MANY examples on the power of Scheme.
+
+*History*
+
+	This program started out as a LISP interpreter then became a
+Prolog interpreter and then the Scheme interpreter that it is today.
+Unsatisfied with the low-cost LISP systems available to students, Gary
+Levin decided to teach a directed study on the implementation of LISP.
+Before we actually started coding, he changed his mind and decided to
+write a Prolog interpreter in Scheme.  We implemented a small "Prolog",
+but when the directed study was over, I was still interested in
+implementing LISP.
+
+	So with Gary as a consultant, I began hammering out a LISP
+interpreter.  However, having worked closely with Scheme, everyone was
+partial to the beauty of Scheme over the complexity of CommonLisp.  I
+was slowly won over, and modified the interpreter before I was
+committed to a particular dialect of LISP.
+
+	The program has been developed using step-wise implementation
+-- get one small part working and debugged then add on little by
+little.  This strategy has made development, change, and testing VERY
+easy.
+
+	Here is how I progressed:
+
+(1) Definition of a CONS node.
+
+(2) Implementation of the memory manager by looking at Gary's ISETL
+source code.  I stole Gary's idea of "registers".
+
+(3) Microcode to operate on lists -- car, cdr, cons, set-car!
+[replaca], set-cdr! [replacd], etc.
+
+(4) Handwritten scanner (you can tell!), and mcRead() and mcWrite()
+[actually called mcGetList() and mcPutList() at the time].
+
+(5) Very simple recursive descent interpreter by strcmping the symbol in
+the first node of a list.  Then I changed over to Scheme.
+
+(6) Recursive descent interpreter with built-in Scheme operations.
+
+(7) Recursive descent interpreter with closures.  The stack was an
+array.  Finally realized that Scheme evals ALL symbols in a list.
+
+(8) Added continuations and changed to a stack-based interpreter with
+a linked list for a stack.
+
+(9) Printed out the Revised^3 Report on Scheme and made modifications to
+make the interpreter more compliant.  Begged Dybvig for easier
+extend-syntax sources, and added macros.
+
+(10) Changed back to an array stack (to cut down on the amount of
+consing in the compiler).  Added macros, quasiquote, and the system
+expander.
+
+(11) Changed the representation of closures and continuations.  Added
+byte-code operations, a byte-code interpreter, and a compile operation to
+generate byte-code.
+
+*Philosophy*
+
+	The philosophy behind this program is KISS - Keep It Simple
+Stupid.  The code is NOT optimized, and I looked for the most obvious way
+to implement everything.  The point of this program is too teach other
+people who are not fortunate enough to have Gary as a professor the beauty
+and ease of Scheme.
+
+	I tried to comment on the meaning of the code rather than the
+actual implementation so that people can get the general gist of what's
+happening without having to dive in.  (However, you'll see that I lost
+steam after a while. :-)
+
+	I tried to make it as portable as possible.  Right now it should
+compile on anything with a functional C compiler.  I'd really like to
+keep it this way.  Please don't make modifications that limit it to
+a certain CPU (unless it's your PERSONAL copy).
+
+	Being my first large software project, I am open to comments on
+style, optimizations, etc.  I am open to "I think this should be like
+this because (a) ..., (b) ..., etc."  I am not open to "Gee, this is a
+stupid way of doing it."
+
+	Please send me bug fixes or bug reports!  I'm shooting for an
+easy to use, robust implementation of Scheme that people are really going
+to use.
+
+	Right now, you can send suggestions, comments, etc to:
+
+	jk0@sun.soe.clarkson.edu	Internet
+	jk0@clutx.clarkson.edu		Internet
+	jk0@clutx.BITNET		Bitnet
+
+*Development*
+
+This is a list of things left to do:
+
+    * Improvement of current implementation:
+(1) Better string handling -- I scrimped a little.  It would be nice if
+unused string and symbol space could be re-used.
+(2) Better number crunching -- I scrimped here too.  (You mean Sqrt(2)
+exists? :-).  Rational numbers would be neat too.
+(3) More robust scanner.  I don't follow R3RS as closely as I would like.
+(4) Better quasiquote.  I'm not satisfied with this implementation.
+
+    * Additions to current implementation:
+(1) Vectors -- not too bad, I just haven't gotten around to them yet.
+(2) Extend-syntax.  I have the Scheme code to do this, but I don't have it
+running yet.
+(3) Extend-syntax or macros for special forms that I don't have.
+(4) The full-screen editor for the PC version.
+(5) Finish the compiler by adding compile-file.
+(6) Adding a debugger and trace facility.  Actually, this could and probably
+will be written in Scheme.
+(7) Engines.
+(8) Structures.
+(9) Object-Oriented Programming -- not too difficult, mostly
+extend-syntax forms and macros.
+
+*Last But Not Least*
+
+	I'm in the market for a grad school that would like a highly
+motivated CS student to study applied CS in Programming Languages and
+Operating Systems.  Or even better, a company or corporation to snatch
+me up and pay me to get my doctorate (Bell Core, Bell Labs, are you
+listening?)

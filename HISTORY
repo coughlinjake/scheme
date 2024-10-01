@@ -1,0 +1,145 @@
+# Changes to Scheme since v1.0 released 2/90
+#	jk0 = Jason Coughlin, jk0@sun.soe.clarkson.edu, or jk0@clutx.BITNET
+8/15/90 - jk0
+	* Adding DUMP-ENVIRONMENT and RESTORE-ENVIRONMENT so that the
+	global environment can be dumped to the disk and later restored.
+	This will allow me to develop more of the interpreter in Scheme.
+	Dumping method has to be flexible so that development of the
+	intepreter in C doesn't require a new dump.
+
+	* Fixed potential problem with constants: #t, #f, and EOF.  As
+	simple symbols, the new dumping method wouldn't have restored
+	them properly.  As a kind of CONS node, they'll be restored
+	properly.
+
+8/9/90  - jk0
+	* Fixes, fixes, fixes.  Got the compiler and byte-code interpreter
+	up.  Ran cfib test:
+		cib: 7.53 seconds
+
+8/5/90  - jk0
+	* Added new binding method that breaks environment into 2 pieces:
+	a nested piece for parameters and nested scopes, and a global
+	piece for bindings created with "define".  The nested piece is
+	still an A-LIST maintained by CONSing bindings on the front and
+	RESTOREing previous nested envs.  The global piece is actually the
+	symbol table.  Symbols no longer point to their string, but point
+	to the symbol table entry.  The symbol table entry contains the
+	string and the global binding.
+		For interpreted variable accesses:
+			search in nested + search in global
+			O( |nested env| ) + O( k )
+
+		For compiled variable accesses:
+			O( k )
+
+	* Don't have the optimized compiler access implemented yet, but
+	re-ran ifib test:
+		ifib: 15.05 seconds, only 1 second behind old cfib test!!!
+
+6/26/90 - jk0
+	* Rewrote scanner.  Scanner is now character-oriented instead of
+	line-oriented.  This is to force the OS to keep track of file
+	positions.  This works fine for line buffering OSes.  However,
+	users with char buffered OSes will lose the ability to backspace.
+
+6/23/90 - jk0
+	* Finished adding vectors.
+
+	* Cleaning up the code a lot!  Rewrote the parser from scratch.
+	Made the convention that global procedures are captalized while
+	local procedures use lower case.
+
+6/5/90  - jk0
+	* Removed stale code: cond, map, let, let*, letrec, etc.
+
+	* Started working on vectors.
+
+	* Trying to decide whether or not to leave boxes implemented in
+	Scheme or to add them as primitives.
+
+5/29/90 - jk0
+	* Byte-codes are now using faster arg passing.  Ran cfib test.
+		cfib - 14.06 secs
+
+5/28/90 - jk0
+	* Completed new interpreter arg passing.  Interpreted functions now
+	receive their args on the value stack like byte-code functions.
+	Byte-code and interpreter now use the same C library so executable
+	has shrunk about 20k.  Faster ifib (haven't gotten the compiler
+	running yet).
+		ifib - 29.39 secs
+
+5/27/90 - jk0
+	* Compiler and byte-code interpreter are running.  Ran ifib tests:
+		ifib - 40.75 secs, cfib - 22.24 secs.
+
+	* Started work on faster argument passing.  Instead of gathering the
+	args into list.  They will be popped off the value stack and
+	bound.  ops will receive their args on the value stack as well.
+
+3/8/90  - jk0
+	* Compiler is running.  Added the byte-code interpreter.
+
+3/4/90  - jk0
+	* Debugging, debugging, debugging.
+
+	* Working on the compiler.
+
+	* Simplified representation of closures and continations.  I made them
+	extensions of the cons node instead of lists.  This makes sense since
+	Scheme has first-class functions and continuations.
+
+3/3/90  - jk0
+	* Modified the evaluator and the environment for primitive operations.
+	New atom nodes are: C-FUNCS and C-FORMS which are bound to the
+	names of the primitive ops.  C-FUNCS and C-FORMS are a structure that
+	contains the # of required args, # of allowed args, and a pointer to
+	the operation.
+
+	* Wrote simple compiler that generates byte-codes and an execution
+	point.
+
+	* Simplified LIST structure.
+
+2/21/90 - jk0
+	* Fixed an obnoxious little bug -- if there was an error in
+	SCHEME.INI, scheme would crash the machine.  Now it prints the
+	error and a message "Error in SCHEME.INI" and terminates.  Probably
+	should recover instead of terminate, but termination is a lot
+	better than a cold reset.
+
+2/20/90 - jk0
+	* Since I removed the primitive ops for these, I added macro defns
+	for named-let, let, let*, letrec, unless, when.
+
+	* Added boxes.
+
+	* Added machine.h.  Trying to get a reasonable base that should
+	compile with mods only to machine.h.
+
+2/18/90 - jk0
+	* Added defn for (EXPAND-ONCE exp) and (EXPAND exp).
+
+	* Added '[' and ']' as '(' and ')' substitutes.
+
+2/16/90 - jk0
+	* Added special form DEFINE-FORM that allows the user to define
+	special forms.  This is so I can cheat with QUASIQUOTE.
+
+	* Added special form QUASIQUOTE.  This is a simple implementation
+	that doesn't handle nested quasiquotations -- just enough to get
+	extend-syntax working.  (And extend-syntax still isn't working.)
+
+	* Added MAP.  (FOR-EACH is the same as map since map evals
+	sequentially).
+
+2/15/90 - jk0
+	* Made expression and value stack continuous chunks of memory
+	again.  Puts overhead on call/cc and continuations to restore
+	the stack.
+
+	* Removed CXR.  I never liked that code.  Cleaner to define the
+	24 CXR functions in SCHEME.INI.
+
+# Scheme v1.0

@@ -1,0 +1,5 @@
+(load "prims.s")
+(load "macfunc.s")
+(load "macdef.s")
+; (load "expand.s")
+; (load "expfile.s")

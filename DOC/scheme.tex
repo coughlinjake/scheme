@@ -1,0 +1,864 @@
+\documentstyle{article}
+
+\title{Implementation of Scheme}
+
+\author{Jason Coughlin}
+\date{3 May 1990}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+	Scheme is a properly tail-recursive, statically-scoped dialect of
+LISP.  Scheme's data-types include symbols, numbers, characters, strings,
+lists, vectors, functions, and continuations.  Its syntax and evaluation
+rules are simple and consistent, allowing Scheme programmers to easily mix
+many programming paradigms.
+
+\section{Function naming}
+
+	The implementation described in this paper was done in the C
+programming language.  Care was taken to keep the implementation
+modularized.  Currently the modules are:
+
+	\begin{enumerate}
+	\item scanner ({\tt scanner.c}) -- the lexical scanner
+	\item microcode ({\tt micro.c}) -- low-level operations that
+directly manipulate representations
+	\item the symbol table ({\tt symstr.c}) -- a closed hash table of
+the symbols
+	\item operations ({\tt ops.c}), predicates ({\tt preds.c}), forms
+({\tt forms.c}) -- the Scheme primitive functions, predicates, and
+special forms
+	\item the evaluator ({\tt eval.c}) -- the interpreter itself
+	\item the top-level ({\tt scheme.c})
+	\end{enumerate}
+
+	A distinction must be made between microcode and operations.
+Microcode ({\tt micro.c}) contain low-level operations required to
+implement the language and data structures.  The microcode directly
+manipulates structures, creating lists, symbols, and strings.  It also
+performs searching, arithmetic, and input/output.  By calling microcode,
+the operations ({\tt ops.c}) implement Scheme functions; there is one
+operation for each Scheme function supported by the implementation.
+
+	The names of microcode routines sometimes overlap the names of
+operations.  A consistent and easy to remember naming scheme is to prefix
+each routine with the module to which it belongs.  For example, the
+microcode {\tt assoc} is named {\tt mcAssoc} while the operation {\tt
+assoc} is named {\tt opAssoc}.
+
+\section{Data Representation}
+
+	In most imperative languages like Pascal and C, indentifiers are
+{\bf statically typed}.  That is, the programmer explicitly declares the type of
+each variable to be an integer, character, or string.  In contrast, Scheme
+is {\bf dynamically typed}, meaning the type of a variable dynamically changes
+at run-time.
+
+	In this implementation, all of Scheme's data-types (lists,
+numbers, characters, strings, vectors) are stored in one higher-level
+representation called {\bf cons} nodes.  A cons node may contain an
+integer, or a float, or a character, etc.  Obviously, the actual
+representations of these types are different, so a cons node is defined as
+one structure with a field for each of these data-types.  As a cons node
+can only be one type at any one time, it is actually the union of these
+types for space efficiency.
+
+\begin{verbatim}
+/* the cons node datatype */
+struct Pair {
+        struct C *car;
+        struct C *cdr;
+} ;
+struct C {
+   int cell_type;               /* PAIR, INT, FLOAT, SYMBOL, CHAR, etc. */
+   BOOL mmark;
+
+   union {
+        struct Pair cons_node;
+        int int_data;
+        REAL_NUM float_data;
+        char *symbol;           /* also points to the string */
+        char character;
+   } data;
+} ;
+typedef struct C CONSNODE;
+typedef struct C *CONS;
+\end{verbatim}
+
+	Each cons node represents one symbol, number, character, or
+string.  The {\tt cell\_type} field marks the type of a cons node.  In the
+implementation, the macro {\tt mcKind} is used to reference the {\tt
+cell\_type} field of a given cons node.  For example, {\tt mcKind(c) =
+PAIR} sets the {\tt cell\_type} field of cons node {\tt c} to {\tt PAIR}.
+
+\section{Memory Management}
+
+	The Scheme programmer is free of the burden of explicitly
+deallocating memory for cons nodes.  This implementation of Scheme
+allocates a certain amount of memory for cons nodes and uses this memory
+until it is gone.  When it needs a new cons node, Scheme {\bf
+garbage-collects}, gathering all cons nodes that aren't currently being
+used.
+
+	This implementation of Scheme uses the Mark-Sweep garbage
+collection method.  A {\bf segment} with a fixed amount of cons nodes is
+allocated, and the nodes are placed on a free-list.  Cons nodes are then
+taken off the free-list on demand.  When the free-list is empty, the
+garbage-collector marks all nodes being used (by marking the stacks and
+the current environment) then sweeps through the segments gathering all
+nodes that weren't marked, placing them on the free-list.  If all of the
+nodes are currently being used, then the free-list is still empty after a
+garbage-collection.  More cons nodes are needed so a new segment is
+allocated and placed on the free-list.
+
+	The marking algorithm passes through the current Scheme
+environment, marking all Scheme variables and their values ({\bf NOTE:}
+The Scheme environment is discussed in the next section).  This protects a
+Scheme programmer's variables from being garbage-collected.  However, a
+mechanism is needed to protect the implementor's local variables as well.
+This implementation uses a {\bf register stack}.  The register stack is an
+array of pointers to cons nodes, and it is manipulated using these macros:
+
+\begin{verbatim}
+/* MM macros */
+#define ENTER		CONS *Old_Top = Top_RegS
+#define REG(x)		CONS *x = (mcRegPush( NIL ), Top_RegS)
+#define R(x)		(*(x))
+#define LEAVE		Top_RegS = Old_Top; return
+\end{verbatim}
+
+	On entry, a C function with local Scheme variables uses the {\tt
+ENTER} macro to mark the current placement in the register stack.  The
+programmer then declares the Scheme variables using the {\tt REG} macro;
+these variables are called {\bf registers} (although they shouldn't be
+confused with C's concept of a register variable).  Since the registers
+are actually pointers to cons nodes, the programmer manipulates register
+variables using the {\tt R} macro.  Lastly, the programmer uses the {\tt
+LEAVE} macro to actually return from this C procedure.  {\tt LEAVE}
+restores the register stack to its state before {\tt ENTER} was called.
+Here is a short example:
+
+\begin{verbatim}
+/* mcCons(head, tail) - Returns a cons node whose car = head and cdr = tail. */
+CONS mcCons(head, tail)
+CONS head, tail;
+{
+   ENTER;               /* mark current placement of register stack */
+   REG(h);              /* declare h, t, and res as cons variables */
+   REG(t);
+   REG(res);
+
+   R(h) = head;         /* h = head of pair */
+   R(t) = tail;         /* t = tail of pair */
+
+   /* need a cons node */
+   R(res) = new_cons();
+   mcKind( R(res) ) = PAIR;     /* result is a cons node of type PAIR */
+
+   /* build the cons node */
+   mcGet_Car( R(res) ) = R(h);
+   mcGet_Cdr( R(res) ) = R(t);
+
+   LEAVE R(res);      /* restore the register stack and return res */
+}
+\end{verbatim}
+
+	Now, to protect local C variables, the programmer declares them
+as register variables, and the marking algorithm is modified so it will
+mark the register stack.  After the C procedure calls {\tt LEAVE}, the
+local variables are popped off the register stack and will be
+garbage-collected.
+
+\section{Static Scope}
+
+	All Scheme bindings of identifiers to values are stored in the
+{\bf environment}.
+
+	Scheme Versions 1.0 and 1.1 used association lists to represent
+environments.  An {\bf association list} (sometimes abbreviated as an {\bf
+a-list}) is a list of pairs.  The a-list is of the form {\tt ( (symbol1 .
+value1) ... )}.  When evaluating a symbol, the interpreter used the Scheme
+operation {\tt assoc} to find the pair that corresponds to the symbol and
+returned its {\tt cdr}.  {\tt assoc} examines the a-list from left to
+right, returning the first pair with a matching symbol.  Therefore, the
+worst case time of finding the binding of an identifier was O(N) where N
+is the number of bindings (the length of the a-list).
+
+	Scheme 1.2 uses a different representation.  In Scheme 1.2, an
+environment is composed of two pieces: a vector and an a-list.  The vector
+is used to store global bindings (created with the {\tt define} special
+form) while the a-list (called the nested environment) is used to store
+bindings of parameters and nested scopes (created with the {\tt lambda}
+special form).  To lookup a symbol in the vector is constant time and to
+lookup a symbol in the a-list is still O(N).  However, since the a-list
+only contains parameters and nested scopes, N will be quite small.
+
+	Note that since Scheme is statically scoped, the compiler could
+be modified to generate code to lookup parameters in constant time.
+However, the compiler in version 1.2 does not use this optimization.
+
+	The Scheme special-form {\tt define} is used to define global
+variables; the symbols are said to be bound at the top-level.  To bind a
+variable to a value, the value is placed in the appropriate vector
+element.  In this implementation, it is an error to {\tt define} a symbol
+that is already bound.
+
+	To change the value of a variable, the special form {\tt set!} is
+called with the variable name and the new value.  {\tt set!} simply
+changes the appropriate vector element.
+
+	In Scheme, functions are {\bf first-class objects} which means
+that functions can be stored in variables, passed as arguments to other
+functions, and returned as values.  Functions are defined with the {\tt
+lamdba} special form.  The syntax of {\tt lambda} is:
+
+\begin{center}
+	{\tt (lambda (parm1 ...) exp1 exp2 ...)}
+\end{center}
+
+	Note that unlike imperative languages which bind all functions to
+a name, this is an ``anonymous'' function; it has no name associated with
+it.  To bind a function to a name, the {\tt define} and {\tt lambda}
+special forms are combined.
+
+\begin{center}
+	{\tt (define (name parm1 ...) exp1 exp2 ...)}
+\end{center}
+
+	Actually, this is ``syntactic sugar'' as a Scheme interpreter
+typically converts this expression into this form:
+
+\begin{center}
+	{\tt (define name (lambda (parm1 ...) exp1 exp2 ...))}
+\end{center}
+
+	Evaluation of the {\tt lambda} special form returns a {\bf
+closure}.  Since functions are first-class objects, a closure is a
+data-type and can be bound to variables as described above.  To achieve
+static scope, the closure contains the nested portion of the environment
+in effect when the function was defined.  The parameters and body of the
+function are also stored in the closure which is represented with an
+extension to the cons node:
+
+\begin{verbatim}
+/* defn of user-defined closures */
+struct Closure {
+   struct C *env;          /* env when closure was defined */
+   struct C *parms;        /* parameters to closure */
+   struct C *body;         /* body of procedure */
+} ;
+struct C {
+   int cell_type;               /* PAIR, INT, FLOAT, SYMBOL, CHAR, etc. */
+   BOOL mmark;
+
+   union {
+        struct Pair cons_node;
+        struct Closure close;
+        int int_data;
+        REAL_NUM float_data;
+        char *symbol;           /* also points to the string */
+        char character;
+   } data;
+} ;
+typedef struct C CONSNODE;
+typedef struct C *CONS;
+\end{verbatim}
+
+	When a closure is applied to its arguments, the parameters to the
+closure are bound to their arguments over the nested environment {\em in the
+closure}.  This achieves {\bf static scope} as the environment in the
+closure is the environment that was in effect when the closure was
+defined.  Bindings are ``consed'' onto the front of this environment.
+Note that global variables might exist with the same name as a parameter,
+so the lookup routine first checks the nested portion of the environment
+then checks the vector portion.
+
+\section{Scheme's Evaluation Rules}
+
+	A {\bf pair} is a cons node that points to two other cons nodes.
+An atom is any data-type that is not a pair.  Symbols, characters,
+numbers, strings, and closures are examples of atoms.  In Scheme, the
+empty list {\tt ()} is also an atomic data-type; it is not considered to
+be a pair so the empty list is also an atom.
+
+	An expression is either an atom or a pair of expressions.
+
+	The interpreter sits in a {\bf read-evaluate-print} loop,
+abbreviated as the {\bf REP} loop.  Scheme reads in an expression,
+evaluates it, and prints the value.
+
+   \subsection{Evaluating atoms}
+
+	Characters, numbers, and strings evaluate to themselves.
+
+\begin{verbatim}
+   ]=> #\a
+   #\a
+
+   ]=> 12.5
+   12.5
+
+   ]=> "this is a TEST"
+   "this is a TEST"
+\end{verbatim}
+
+	Symbols evaluate to the value to which they are currently bound.
+It is an error to evaluate an unbound symbol.  Assume {\tt a} is bound to
+5, {\tt b} is bound to the string ``this is a test'', and {\tt c} is an
+unbound variable.
+
+\begin{verbatim}
+   ]=> a
+   5
+
+   ]=> b
+   "this is a test"
+
+   ]=> c
+   ERROR: Unbound symbol c.  Returning to top-level.
+\end{verbatim}
+
+	Here is a function which will evaluate an atom:
+
+\begin{verbatim}
+
+/* evEvalAtom( atom, env ) - Returns the evaluation of the atom in the
+	current evironment.
+*/
+static CONS evEvalAtom( atom )
+CONS atom;
+{
+   CONS binding;
+
+   /* (eval #T) => #T && (eval #F) => #F && (eval number) => number */
+   if ( atom == T  || atom == F || mcNumber(atom) )
+	return atom;
+
+   /* (eval string) => string && (eval char) => char */
+   if ( mcString(atom) || mcChar(atom) || mcVector(atom) )
+	return atom;
+
+   if ( !mcSymbol(atom) )
+	RT_LERROR("EVAL: Can't evaluate non-symbol: ", atom);
+
+   /* (eval symbol) => symbol's-binding */
+   binding = evAccNested( atom, glo_env );
+   if ( !mcNull(binding) ) {
+	/* symbol's-binding = cdr(binding) [remember they're dps!] */
+	binding = mcCdr( binding );
+	return binding;
+   }
+   else if ( (binding = evAccGlobal( atom, glo_env )) != NULL ) {
+	return binding;
+   }
+
+   RT_LERROR("EVAL: Undefined symbol ", atom);
+}
+\end{verbatim}
+
+   \subsection{Evaluating a list of expressions}
+
+	Scheme uses prefix notation when evaluating a list of
+expressions; the first element of the list is considered to be the
+function or special form to be applied and the rest of the elements are
+the function's or form's arguments.
+
+	First, Scheme evaluates the first element of the list to
+determine whether it is a special form or a function.  If it is a special
+form, the evaluator immediately invokes the special form with its
+arguments unevaluated.  If the first element is a function, the evaluator
+recursively evaluates each of the function's arguments before applying
+the function to its arguments.
+
+	The evaluator is actually broken into two pieces, an evaluator
+({\tt eval}) and a function applicator ({\tt apply}).  The function
+applicator takes a {\em closure} and its arguments and actually invokes
+the function on its arguments.  The evaluator is then defined in terms of
+the applicator.  {\tt eval} evaluates the expressions of a list to obtain
+the closure and its evaluated arguments.  It then invokes the applicator
+with the closure and its arguments.  Since the applicator receives its
+arguments already evaluated, special forms must be handled by the
+evaluator itself.
+
+\section{First stage: Recursive Model}
+
+	Since Scheme's evaluation rule is recursively defined, it makes
+sense that it can be implemented using recursion.  In the recursion model,
+{\tt eval} will be handed an expression to evaluate and the environment in
+which to evaluate it.  The expression can be either an atom or a list.  If
+the expression is an atom, {\tt eval} calls {\tt mcEvalAtom} with the atom
+to be evaluated and the environment passed to eval.  If the expression is
+a list, {\tt eval} evaluates the first element of the list to determine
+whether or not it is evaluating a special form or a function.
+
+	If {\tt eval} is evaluating a special form, it invokes the special
+form with its unevaluated arguments and the current environment.  The
+environment is necessary as some forms like {\tt define} and {\tt set!}
+evaluate some of their arguments.  In this model, these forms simply call
+{\tt mcEval} with the argument needing evaluation and the environment
+which was passed to them.  Notice that since special forms evaluate their
+arguments in the {\em current} environment, they have {\bf dynamic scope}.
+
+	However, if {\tt eval} is evaluating a function, it calls itself
+on each of the function's arguments, collecting their values into a list.
+To invoke the function on its arguments, it simply calls {\tt apply} with
+the closure, the evaluated argument list, and the current environment.
+
+\begin{verbatim}
+CONS evEval(expr, env)
+CONS expr, env;
+{
+   if ( mcAtom(expr) )
+        /* symbols, numbers, characters, strings, and '() */
+        return evEvalAtom( expr, env );
+   else {
+        ENTER;
+        REG(f);
+        REG(e);
+        REG(args);
+        REG(val);
+
+        /* evaluating a list of expressions -- evaluate first element */
+        R(f) = evEval( mcCar(expr), env );
+        expr = mcCdr(expr);
+
+        /* is it a special form? */
+        if ( mcForm( R(f) ) )
+                /* invoke form on it's arguments */
+                return evEvalForm( R(f), expr, env );
+
+        /* evaluate the arguments
+         * reverse the arguments
+         * (arg1 arg2 ...) becomes (... arg2 arg1)
+         * then args are evaluated and consed together back into the right
+         * order
+         */
+        R(args) = NIL; R(e) = mcRev(expr);
+        while ( !mcNull( R(e) ) ) {
+                /* evaluate arg and tack onto front of arg list */
+                R(args) = mcCons( mcEval( mcCar( R(e) ), env ), R(args) );
+                R(e) = mcCdr( R(e) );
+        }
+
+        /* apply the function to its args */
+        R(val) = evApply( R(f), R(args) );
+        MCLEAVE R(val);
+   }
+}
+\end{verbatim}
+
+	Now the only missing piece is {\tt apply}, the function
+applicator.  {\tt apply} takes a closure, its arguments, and the current
+environment.  It returns the value of ``applying'' the closure to its
+arguments in the current environment.  The first step to applying a
+procedure is to extend the environment in the closure by binding the
+parameters of the procedure to its arguments (Refer to {\bf Static
+Scope}).  Then the body of the procedure is evaluated with this extended
+environment, and the value of the last expression is returned.  When {\tt
+apply} is done, the environment in effect {\em before} the application
+must be restored so that the parameter bindings disappear.
+
+\begin{verbatim}
+/* evApply(func, args) - Apply the function to its arguments in the
+        function's environment.  func is a closure and args is the list of
+        evaluated arguments.
+*/
+CONS evApply(func, args)
+CONS func, args;
+{
+   ENTER;
+   REG(body);           /* the body of the procedure */
+   REG(env);            /* the environment to evaluate the body in */
+   REG(value);          /* value of last evaluation */
+
+   /* make sure we're applying a procedure */
+   if ( !mcClosure(func) )
+        RT_LERROR("APPLY: Attempt to apply non-procedure: ", func);
+
+   /* (1) Extend environment; Bind parameters to args.
+    *     bindings are consed onto the front of the environment
+    *     in the closure to achieve static scope
+    */
+   R(env) = evBindArgs( mcGet_Parms(func), args, mcGet_Env(func) );
+
+   /* (2) Evaluate the body in this closure */
+   R(body) = mcGet_Body(func);
+   R(value) = NIL;
+
+   while ( !mcNull( R(body) ) ) {
+        /* evaluate the first expression in the extended environment */
+        R(value) = evEval( mcCar( R(body) ), R(env) );
+
+        /* evaluate the rest of the expressions */
+        R(body) = mcCdr( R(body) );
+   }
+
+   /* return the value -- recursion will automatically restore the previous
+    * environment for us.  the extended environment will be garbage-
+    * collected next garbage-collection
+    */
+   MCLEAVE R(value);
+}
+\end{verbatim}
+
+	Notice that {\tt eval} and {\tt apply} are mutually recursive.  It
+is the implementation language's (C's) recursion that will
+``automatically'' restore the previous environments as we step back
+through the recursion to the top-level.
+
+	To conclude, this model of the interpreter is fairly easy to
+understand and implement.  It is a good model to aquaint the implementor
+with the semantics of evaluation.  However, it is not possible to
+implement Scheme's more powerful constructions with this model in C.
+
+\section{Second stage: The Stack Model}
+
+	The interpreter must constantly keep track of the current state of
+evaluation.  A state of evaluation is both the expression to evaluate {\em
+and} where to pass the value of the evaluation.  Passing the value of an
+evaluation is completing a computation and is called the {\bf
+continuation}.  Essentially, a continuation is how to {\em continue} a
+computation.  Scheme allows the Scheme programmer to ``capture'' any
+evaluation's continuation and to ``continue'' the computation later.
+
+	In the recursive-descent model, the implementation language's
+recursion is implicitly handling the state of the interpreter for the
+programmer.  This might be fine for a simple dialect of LISP, since the
+programmer has such limited control over any state.  However, it is not a
+suitable model for Scheme.  Continuations grant the Scheme programmer
+explicit control of evaluation.  Clearly, the implementor needs explicit
+control over the state of the interpreter.  The programmer gains this
+control by using a stack-based model.
+
+	Any state of evaluation has two parts, the expression to evaluate,
+and what to do with the value.  Two stacks are used to represent any
+particular state, an expression stack and a value stack.  The expression
+stack, denoted e-stack, will contain the expressions to evaluate while the
+value stack, denoted v-stack, will hold the values of the evaluations.
+Normally, the evaluator will pop an expression off the e-stack, evaluate
+it, and push the value on the v-stack.  Evaluation continues until the
+e-stack is empty.
+
+	This model is completely iterative and needs to be iterative so
+the implementator has complete control over evaluation.  It is easy to
+evaluate atoms.  However, we learned in the last section that lists are
+evaluated by recursively evaluating their sub-expressions.
+
+	To recursively evaluate the sub-expressions of a list, {\tt eval}
+pops the list off the e-stack and pushes each element of the list back on
+the e-stack.  On the next iteration, {\tt eval} will start popping and
+evaluating the sub-expressions.  The only problem is recognizing that all
+of a function's arguments have been evaluated and that it is time to
+apply the function.  The solution is to push markers on both stacks
+before the sub-expressions are pushed.  When a marker is popped off the
+e-stack, the function and its arguments are on the v-stack.  They are
+popped, the arguments are consed into a list, and {\tt apply} is called.
+
+	The sub-expressions need to be pushed onto the e-stack so that the
+first sub-expression is evaluated first to determine whether it is a
+special form or a function.
+
+   \subsection{Special Forms}
+
+	Most special forms evaluate some of their arguments.  In the
+recursive model, a special form just called {\tt mcEval} with the
+expression to be evaluated.  Under the stack model, the programmer can not
+use recursion; the expression must be pushed on the e-stack and the
+special form must return to {\tt mcEval} which will evaluate the
+expression and leave the result on the v-stack.  The problem is that the
+special form needs to terminate in order to evaluate an argument, but the
+form can't terminate until it has completed its work.  A continuation is
+needed to ``continue'' the special form {\em after} its argument has been
+evaluated.  This will be discussed later, but the cost of an actual
+continuation is too high to just ``resume'' a special form.  Instead,
+this implementation uses the concept of a {\bf resume}.
+
+	The special form is broken into two procedures.  One procedure
+will perform any work that can be done before an argument needs to be
+evaluated.  It will then package the work left to do into a resume.  A
+resume is much simpler than a continuation.  It is a list of the form:
+{\tt (*RESUME* special-form anything-needed-by-the-special-form)} that is
+pushed on the e-stack underneath the argument to be evaluated.  This
+procedure then terminates.  {\tt mcEval} pops the argument, evaluates it,
+pushes the value on the v-stack, and pops the resume.  Since the resume
+contains the special form, {\tt mcEval} is able to call the second
+procedure of the special form.  The second procedure simply pops the value
+of the argument off the v-stack and completes the work.
+
+   \subsection{Restoring environments}
+
+	The recursive model passed a ``current environment'' in which to
+evaluate expressions.  Since the environments were ``local'', the
+recursion automatically restored environments.  For the iterative stack
+model, it is more convienent for the ``current environment'' to be the
+global variable {\tt glo\_env}.  Restoring the previous environment is now
+the programmer's responsibility, and it is handled by saving {\tt glo\_env}
+before extending the environment in the closure to be evaluated.
+
+	Remember that the e-stack contains
+``expressions-to-be-evaluated.''  Therefore, {\tt apply} can push {\tt
+glo_env} on the e-stack followed by a special marker called {\tt RESTORE}.
+Then to evaluate the closure, {\tt glo\_env} is set to the extension of
+environment in the closure  The body of the closure is pushed on the
+e-stack, and {\tt apply} simply returns to {\tt eval}.  {\tt eval} pops
+the body of the closure off the e-stack and evaluates it, leaving the
+value on the v-stack.  Finally, the previous environment is restored when
+{\tt eval} pops {\tt RESTORE}.
+
+   \subsection{Implementation}
+
+\begin{verbatim}
+/* evEval() - Evaluate the expression on TOP of the expression stack in the
+        given environment.  Returns the evaluation on the value stack.
+        Expressions are evaluated in the current environment which is
+        glo_env (a global variable).
+*/
+void evEval()
+{
+   ENTER;
+
+   REG(exp);            /* expression to evaluate */
+   REG(func);           /* function to invoke */
+   REG(eargs);          /* evaluated args */
+   REG(tmp);            /* temporary register */
+
+   R(eargs) = NIL;      /* no args evaluated yet */
+
+   /* Keep evaluating until there are no more expressions to evaluate */
+   while ( mcHaveExprs() ) {
+
+        /* evaluate the expression on top of the expression stack */
+        R(exp) = mcPopExpr();
+
+        if ( R(exp) == CALL ) {
+
+                /* apply the function on the value stack */
+
+                /* gather the arguments and function off of the
+                 * value stack.
+                 */
+                R(eargs) = evGatherArgs();
+                R(func) = mcCar( R(eargs) );
+                R(eargs) = mcCdr( R(eargs) );
+
+                /* apply func to it's arguments */
+                evApply( R(func), R(eargs) );
+        }
+        else if ( R(exp) == RESTORE ) {
+                /* restore previous environment */
+                glo_env = mcPopExpr();
+        }
+        else if ( mcResume( R(exp) ) ) {
+                /* resume a func or form */
+                evInvokeRes( R(exp) );
+        }
+        else if ( mcAtom( R(exp) ) ) {
+
+                /* evaluate an atom */
+                R(exp) = evEvalAtom( R(exp) );
+
+                /* invoke a special form before it's args are
+                 * evaluated.
+                 */
+                if ( mcForm( R(exp) ) )
+                        evInvokeForm( R(exp) );
+                else mcPushVal( R(exp) );
+        }
+        else {
+                /* evaluate list of expressions */
+
+                /* mark place on stacks */
+                mcPushVal( MARK );
+                mcPushExpr( CALL );
+
+                /* put exps on stack, so stack-top == 1st exp
+                 * mcRev() is destructive so need to keep a pointer
+                 * so we can restore the exp later
+                 */
+                R(exp) = mcRev( R(exp) );
+                R(tmp) = R(exp);
+
+                /* NOTE: DO-WHILE assumes (CAR NIL) => NIL */
+                do {
+                        mcPushExpr( mcCar( R(exp) ) );
+                        R(exp) = mcCdr( R(exp) );
+                } while ( R(exp) != NIL );
+
+                /* restore exp to original state */
+                R(tmp) = mcRev( R(tmp) );
+        }
+   }
+   MCLEAVE;
+}
+
+/* evApply(func, args) - Apply the function to its arguments in the
+        function's environment.  func is a closure and args is the list of
+        evaluated arguments.
+*/
+CONS evApply(func, args)
+CONS func, args;
+{
+   /* make sure we're applying a procedure */
+   if ( !mcClosure(func) )
+        RT_LERROR("APPLY: Attempt to apply non-procedure: ", func);
+
+   /* (1) Save the current environment */
+   mcPushExpr( glo_env );
+   mcPushExpr( RESTORE );
+
+   /* (2) Extend environment; Bind parameters to args.
+    *     bindings are consed onto the front of the environment
+    *     in the closure to achieve static scope
+    */
+   glo_env = evBindArgs( mcGet_Parms(func), args, mcGet_Env(func) );
+
+   /* (3) Evaluate the body in this closure */
+   mcPushExpr( mcGet_Body(func) );
+}
+\end{verbatim}
+
+   \subsection{Tail Recursion}
+
+	A {\bf tail-call} occurs when a procedure directly calls another
+procedure as its value.  A procedure is {\bf tail-recursive} when it
+recursively tail-calls itself.
+
+\begin{verbatim}
+   (define (write-out n)
+     (if (zero? n)
+         (write n)
+         (write-out (- n 1))
+     )
+   )
+\end{verbatim}
+
+	The procedure {\tt write-out} is tail-recursive as its value is
+the value returned by directly calling itself with {\tt n-1}.  Calling
+{\tt (write-out 100)} in most dialects of LISP would push 100 {\tt
+RESTORE}s and 100 previous environments to backtrack through before the
+value of {\tt (write 0)} would be returned.  However, Scheme is properly
+tail-recursive, which means that Scheme treats tail-recursive calls as
+simple branches.  A Scheme implementation will only push one environment
+and one {\tt RESTORE}.
+
+	Implementation of tail-call handling is straight-forward in the
+stack-model.  A tail-call involves the direct application of another
+procedure as the value of the current procedure.  To invoke the tail-call,
+{\tt apply} will push a {\tt RESTORE}.  But since the tail-call is the
+value of the current procedure, there are no more expressions to the body
+of the current procedure on the e-stack.  This means that the {\tt
+RESTORE} that {\tt apply} pushed before invoking the current procedure is
+now on the top of the stack.  To eliminate tail-recursion, {\tt apply}
+simply checks to make sure that a {\tt RESTORE} is not on the top of the
+e-stack.
+
+	A tail-recursive procedure will cause only one environment to be
+saved on the e-stack, the environment before the {\em first} invokation of
+the tail-recursive procedure.  As a result, the stack will not grow very
+large during evaluation, and the tail-recursive procedure will immediately
+return to its caller without backtracking through the recursive calls.
+The net effect is that tail-recursive procedures become simple loops.
+
+   \subsection{Continuations}
+
+	Recall that any state of the interpreter involves what to evaluate
+and what to do with the value.  ``What to do with the value'' is called
+the {\bf continuation} of an evaluation.  The Scheme programmer can
+capture the continuation of an evaluation and ``continue'' with a
+different value with the {\tt call-with-current-continuation}, abbreviated
+as {\tt call/cc}, procedure.
+
+\begin{center}
+{\tt (call/cc procedure)}
+\end{center}
+
+	{\tt call/cc} obtains {\em its} continuation (where the call to
+{\tt call/cc} is supposed to pass its value) and passes this continuation
+to {\tt procedure}.  {\tt procedure} must be a function of one argument.
+Since the continuation represents ``what to do with the value'', the
+continuation itself is a function of one argument, the value to continue
+with after the {\tt call/cc} call.  Here are some examples taken from
+\underline{The Scheme Programming Language} by R. Kent Dybvig.
+
+\begin{verbatim}
+   ]=> (call/cc procedure?)
+
+   #T
+\end{verbatim}
+
+	This example illustrates the point that a continuation acts like a
+function of 1 argument.  {\tt procedure?} is a function of 1 argument that
+returns {\tt #T} if it's argument is a function, {\tt #F} otherwise.  {\tt
+call/cc} captures it's continuation and binds it to {\tt procedure?}'s
+parameter.  {\tt procedure?} returns that the continuation is a function.
+
+\begin{verbatim}
+   ]=> (call/cc
+           (lambda (return-value)
+               (* 5 4)))
+   20
+\end{verbatim}
+
+	In this example, the {\tt call/cc}'s continuation is bound to
+{\tt return-value}.  However, the lambda function never uses {\tt
+return-value} so the continuation is never invoked.  The value of {\tt
+call/cc} in this case is the value of the function: 5 * 4.
+
+\begin{verbatim}
+   ]=> (call/cc
+           (lambda (return-value)
+               (* 5 (return-value 4))))
+   4
+\end{verbatim}
+
+	Again, {\tt call/cc}'s continuation is bound to {\tt
+return-value}.  However, in this example, {\tt return-value} is {\em
+invoked} with the value 4.  Therefore, the {\tt call/cc}'s evaluation
+continues with the value 4.  The part of the expression ``(* 5'' is never
+even evaluated.
+
+\begin{verbatim}
+   ]=> (+ 2
+            (call/cc
+                (lambda (return-value)
+                   (* 5 (return-value 4)))))
+   6
+\end{verbatim}
+
+	This example is just like the previous example accept the value
+of the continuation (4) is added to 2.
+
+	The state of the interpreter is represented with the current
+e-stack, v-stack, and environment.  Therefore, to capture the current
+state, a continuation needs to capture the current e-stack, v-stack, and
+environment.  Here is the structure representing a continuation:
+
+\begin{verbatim}
+/* defn of a continuation */
+struct Continuation {
+   struct C *env;       /* env in effect at capture */
+   struct C *vals;      /* value stack at capture */
+   struct C *exps;      /* expression stack at capture */
+} ;
+\end{verbatim}
+
+	When the interpreter evaluates {\em the continuation}, it pops the
+continuation's argument off the v-stack, restores e-stack, v-stack, and
+environment from the continuation, and pushes the value back on the
+v-stack.  This effectively continues evaluation with the specified value
+from the point when the continuation was captured.
+
+	Remember that certain special forms needed to evaluate some of
+their arguments.  Since the interpreter is iterative, they needed to push
+their argument, return to {\tt eval}, then ``continue'' their own work.
+Special forms could be implemented with continuations.  However, capturing
+and restoring the e-stack and v-stacks is an expensive operation,
+especially when the interpreter has a lot to evaluate.  Using ``resumes''
+accomplishes the same task without the overhead associated with
+continuations.
+
+\end{document}

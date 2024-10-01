@@ -1,0 +1,23 @@
+[=> 
+"extend.s"
+[=> 
+"unify2.s"
+[=> 
+"prove6.s"
+[=> 
+"prims.s"
+[=> 
+YES
+[=> (Failed.)
+
+()
+[=> ((? X) = 1)
+
+YES
+[=> ((? X) = 2)
+
+YES
+[=> ((? X) = 3)
+
+YES
+[=> 

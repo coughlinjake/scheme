@@ -1,0 +1,4 @@
+Problems
+--------
+
+(2) String space should be reclaimed for GCed strings.
